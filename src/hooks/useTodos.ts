@@ -1,17 +1,15 @@
-// src/hooks/useTodos.ts
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface Todo {
-  id: number;
+  _id: string;  // Use string to match MongoDB's ObjectId format
   title: string;
-  isCompleted: boolean;
+  is_completed: boolean;
 }
 
 export function useTodos() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [editedTodos, setEditedTodos] = useState<Map<number, boolean>>(new Map());
 
   useEffect(() => {
     fetchTodos();
@@ -22,7 +20,8 @@ export function useTodos() {
       setIsLoading(true);
       const result: Todo[] = await invoke("get_todos");
       console.log("Fetched Todos:", result);
-      setTodos(result);
+      console.log("Fetched Todos:", result);
+      setTodos(result.map(todo => ({ ...todo, id: todo._id?.toString() || '' }))); // Ensure ID is string
     } catch (error) {
       console.error("Error fetching todos:", error);
     } finally {
@@ -36,53 +35,48 @@ export function useTodos() {
       return;
     }
     try {
-      await invoke("insert_todo", { title: title.trim(), isCompleted: false });
-      fetchTodos();
+      const encodedTitle = encodeURIComponent(title.trim());
+      await invoke("insert_todo", { title: encodedTitle, isCompleted: false });
+      fetchTodos(); // Refresh the list after adding
     } catch (error) {
       console.error("Error adding todo:", error);
+      alert("Failed to add todo.");
     }
   };
 
-  const toggleTodo = (id: number, isCompleted: boolean) => {
-    setEditedTodos((prev) => new Map(prev).set(id, !isCompleted));
-    setTodos((prev) =>
-      prev.map((todo) =>
-        todo.id === id ? { ...todo, isCompleted: !isCompleted } : todo
-      )
+  const toggleTodo = (id: string, isCompleted: boolean) => {
+    // Create a new array with the updated todos
+    const updatedTodos = todos.map((todo) =>
+      todo._id.$oid === id ? { ...todo, is_completed: !isCompleted } : todo
     );
+  
+    // Update the todos state with the modified array
+    setTodos(updatedTodos);
+  
+    // Optionally, add backend persistence here if needed.
   };
+  
+  
 
-  const updateTodo = async (id: number) => {
+  const updateTodo = async (id: string, title: string, isCompleted: boolean) => {
     try {
-      const todo = todos.find((todo) => todo.id === id);
-      if (!todo) return;
-
-      const isCompleted = editedTodos.get(id) ?? todo.isCompleted;
-
-      await invoke("update_todo", {
-        id,
-        title: todo.title,
-        isCompleted,
-      });
-
-      alert("Todo updated successfully!");
-      setEditedTodos((prev) => {
-        const newMap = new Map(prev);
-        newMap.delete(id);
-        return newMap;
-      });
+      const encodedTitle = encodeURIComponent(title);
+      await invoke("update_todo", { id, title: encodedTitle,  isCompleted });
+      fetchTodos(); // Refresh the list after updating
     } catch (error) {
       console.error("Error updating todo:", error);
       alert("Failed to update todo.");
     }
   };
+  
 
-  const deleteTodo = async (id: number) => {
+  const deleteTodo = async (id: string) => {
     try {
       await invoke("delete_todo", { id });
-      fetchTodos();
+      fetchTodos(); // Refresh the list after deletion
     } catch (error) {
       console.error("Error deleting todo:", error);
+      alert("Failed to delete todo.");
     }
   };
 
@@ -93,12 +87,5 @@ export function useTodos() {
     toggleTodo,
     updateTodo,
     deleteTodo,
-    setTodos,
-    handleInputChange: (id: number, value: string) =>
-      setTodos((prev) =>
-        prev.map((todo) =>
-          todo.id === id ? { ...todo, title: value } : todo
-        )
-      ),
   };
 }
